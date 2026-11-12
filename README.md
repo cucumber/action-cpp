@@ -35,7 +35,7 @@ steps:
   # ... install system packages (nlohmann-json, gtest, ...) ...
 
   - name: Install cucumber_messages
-    uses: cucumber/ci-actions/install-cpp-dep@v1
+    uses: cucumber/action-cpp/install-cpp-dep@v1
     with:
       repository: cucumber/messages
       ref: ${{ env.MESSAGES_REF }}
@@ -50,13 +50,13 @@ would add one call per dependency it builds:
 
 ```yaml
   - name: Install cucumber_messages
-    uses: cucumber/ci-actions/install-cpp-dep@v1
+    uses: cucumber/action-cpp/install-cpp-dep@v1
     with:
       repository: cucumber/messages
       ref: ${{ env.MESSAGES_REF }}
 
   - name: Install cucumber_query
-    uses: cucumber/ci-actions/install-cpp-dep@v1
+    uses: cucumber/action-cpp/install-cpp-dep@v1
     with:
       repository: cucumber/query
       ref: ${{ env.QUERY_REF }}
