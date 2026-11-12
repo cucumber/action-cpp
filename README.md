@@ -1,4 +1,4 @@
-# ci-actions
+# action-cpp
 
 Reusable GitHub Actions shared across the Cucumber C++ projects.
 
