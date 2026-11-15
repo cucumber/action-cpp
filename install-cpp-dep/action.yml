@@ -31,29 +31,38 @@ runs:
       id: resolve
       working-directory: ${{ inputs.working-directory }}
       shell: bash
+      env:
+        INPUT_DEPENDENCY: ${{ inputs.dependency }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_PATH: ${{ inputs.path }}
       run: |
-        if [ ! -f "${{ inputs.dependency }}" ]; then
-          echo "${{ inputs.dependency }} does not exist in ${{ inputs.working-directory }}"
+        if [ ! -f "$INPUT_DEPENDENCY" ]; then
+          printf '%s does not exist in %s\n' "$INPUT_DEPENDENCY" "$INPUT_WORKING_DIRECTORY" >&2
           exit 1
         fi
         
-        reference=$(cat "${{ inputs.dependency }}" | grep -E "[0-9a-z]+/[0-9a-z]+@[0-9a-z]{40}( #.*)?")
-        if [ -z "$reference" ]; then
-          echo "${{ inputs.dependency }} does not contain a valid reference" 
+        if ! reference=$(cat -- "$INPUT_DEPENDENCY" | grep -E "[0-9a-z]+/[0-9a-z]+@[0-9a-z]{40}( #.*)?"); then
+          printf '%s does not contain a valid reference\n' "$INPUT_DEPENDENCY" >&2
           exit 1
         fi
         
-        repository=$(echo "$reference" | cut -d '@' -f 1)
-        ref=$(echo "$reference" | cut -d '@' -f 2 | cut -d ' ' -f 1)
+        repository=$(printf '%s\n' "$reference" | cut -d '@' -f 1)
+        ref=$(printf '%s\n' "$reference" | cut -d '@' -f 2 | cut -d ' ' -f 1)
         
-        echo "repository=${repository}" >> "$GITHUB_OUTPUT"
-        echo "ref=${ref}" >> "$GITHUB_OUTPUT"
-        
-        if [ -n "${{ inputs.path }}" ]; then
-          echo "path=${{ inputs.path }}" >> "$GITHUB_OUTPUT"
+        if [ -n "$INPUT_PATH" ]; then
+          path=$INPUT_PATH
         else
-          echo "path=${repository##*/}-src" >> "$GITHUB_OUTPUT"
+          path=${repository##*/}-src
         fi
+
+        for value in "$repository" "$ref" "$path"; do
+          if [[ "$value" == *$'\r'* || "$value" == *$'\n'* ]]; then
+            printf '%s\n' 'Resolved repository, ref and path must not contain CR or LF.' >&2
+            exit 1
+          fi
+        done
+
+        printf 'repository=%s\nref=%s\npath=%s\n' "$repository" "$ref" "$path" >> "$GITHUB_OUTPUT"
     - name: Checkout ${{ inputs.repository }}
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -67,15 +76,23 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       working-directory: ${{ steps.resolve.outputs.path }}/cpp
+      env:
+        INPUT_PRESET: ${{ inputs.preset }}
       run: |
-        cmake --workflow --preset "${{ inputs.preset }}"
-        sudo cmake --install build/"${{ inputs.preset }}"
+        cmake --workflow --preset "$INPUT_PRESET"
+        sudo cmake --install "build/$INPUT_PRESET"
 
     # Windows: no sudo; the vcpkg/default prefix is user-writable.
     - name: Build and install (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
       working-directory: ${{ steps.resolve.outputs.path }}/cpp
+      env:
+        INPUT_PRESET: ${{ inputs.preset }}
       run: |
-        cmake --workflow --preset "${{ inputs.preset }}"
-        cmake --install build/"${{ inputs.preset }}"
+        $workflowArgs = @('--workflow', '--preset', $env:INPUT_PRESET)
+        & cmake @workflowArgs
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $installArgs = @('--install', ('build/' + $env:INPUT_PRESET))
+        & cmake @installArgs
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

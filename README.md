@@ -13,10 +13,15 @@ cucumber_*" step pairs currently duplicated across every `test-cpp.yaml` job.
 
 | Input        | Required | Default        | Description                                             |
 | ------------ | -------- | -------------- | ------------------------------------------------------- |
-| `repository` | yes      | —              | `owner/name` to build (e.g. `cucumber/messages`).       |
-| `ref`        | yes      | —              | Git ref (tag, branch, or SHA) to check out and build.   |
+| `dependency` | yes      | —              | File containing `owner/name@<40-character commit>` with an optional ` # comment`. |
+| `working-directory` | yes | —            | Directory in which the dependency file is read. |
 | `path`       | no       | `<name>-src`   | Checkout directory. Defaults to the repo name + `-src`. |
 | `preset`     | no       | `host-system`  | CMake workflow preset used to build the dependency.     |
+
+Inputs are passed to commands as literal data, not executable shell source.
+The resolved repository, commit and checkout path must not contain CR or LF;
+multiline values (including multiple matching dependency references) fail before
+checkout outputs are written. Preset names remain subject to CMake's rules.
 
 ### Usage
 
@@ -24,9 +29,6 @@ A downstream workflow references it by `owner/repo@ref`. For example, `query`'s
 `test-cpp.yaml` only needs to declare its direct dependency — `messages`:
 
 ```yaml
-env:
-  MESSAGES_REF: e85a9eaf3fa3787c25bc62b6ea67672e709ee4fa
-
 steps:
   - uses: actions/checkout@v7
     with:
@@ -37,8 +39,8 @@ steps:
   - name: Install cucumber_messages
     uses: cucumber/action-cpp/install-cpp-dep@v1
     with:
-      repository: cucumber/messages
-      ref: ${{ env.MESSAGES_REF }}
+      dependency: dependencies/messages.version
+      working-directory: .
 
   - name: Build and unit test
     working-directory: cpp
@@ -52,52 +54,56 @@ would add one call per dependency it builds:
   - name: Install cucumber_messages
     uses: cucumber/action-cpp/install-cpp-dep@v1
     with:
-      repository: cucumber/messages
-      ref: ${{ env.MESSAGES_REF }}
+      dependency: dependencies/messages.version
+      working-directory: .
 
   - name: Install cucumber_query
     uses: cucumber/action-cpp/install-cpp-dep@v1
     with:
-      repository: cucumber/query
-      ref: ${{ env.QUERY_REF }}
+      dependency: dependencies/query.version
+      working-directory: .
+```
+
+For example, `dependencies/messages.version` contains:
+
+```text
+cucumber/messages@e85a9eaf3fa3787c25bc62b6ea67672e709ee4fa # v34.2.1
 ```
 
 ## Keeping the pinned refs up to date with Renovate
 
-The `*_REF` values are plain git commits, which Renovate does not track out of
-the box. Two pieces are needed:
+Dependency files contain plain git commits. Configure a Renovate custom manager
+for these files in the downstream repository (or centrally in
+`cucumber/renovate-config`), for example:
 
-1. **An annotation comment** on each ref in the workflow, declaring the
-   datasource, the repository, and the branch to follow:
+```json
+{
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^dependencies/.+\\.version$/"],
+      "matchStrings": [
+        "(?<depName>[0-9a-z]+/[0-9a-z]+)@(?<currentDigest>[0-9a-f]{40})"
+      ],
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/{{{depName}}}",
+      "currentValueTemplate": "main"
+    }
+  ]
+}
+```
 
-   ```yaml
-   env:
-     # renovate: datasource=git-refs depName=cucumber/messages packageName=https://github.com/cucumber/messages currentValue=main
-     MESSAGES_REF: e85a9eaf3fa3787c25bc62b6ea67672e709ee4fa
-   ```
-
-   `git-refs` + `currentValue=main` tells Renovate to bump the pinned commit to
-   the latest `main` (use a tag name here and `datasource=github-tags` to track
-   releases instead).
-
-2. **A custom manager** in the repo's `.github/renovate.json` that reads those
-   annotations (add it once per repo, or centrally in
-   `cucumber/renovate-config`):
-
-   ```json
-   {
-     "customManagers": [
-       {
-         "customType": "regex",
-         "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-         "matchStrings": [
-           "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) packageName=(?<packageName>\\S+) currentValue=(?<currentValue>\\S+)\\s+\\w+_REF:\\s*(?<currentDigest>[0-9a-f]{7,40})"
-         ]
-       }
-     ]
-   }
-   ```
+This follows the repository's `main` branch.
 
 The `actions/checkout` pin inside `install-cpp-dep/action.yml` is handled
 automatically by Renovate's built-in `github-actions` manager — no annotation
 required.
+
+## Regression tests
+
+Run `python -m pip install -r tests/requirements.txt`, then
+`python -m unittest discover -s tests -v` from this repository.
+The tests execute the action scripts with stubbed commands; they do not install
+dependencies or invoke real sudo. PowerShell tests require `pwsh` and are skipped
+when it is unavailable. On Windows, set `ACTION_TEST_BASH` to the Git Bash
+executable. CI runs the tests on Linux and Windows.
